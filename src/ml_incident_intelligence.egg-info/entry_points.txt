@@ -1,0 +1,2 @@
+[console_scripts]
+mii-server = mii.server:main
