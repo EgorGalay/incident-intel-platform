@@ -14,13 +14,15 @@ def render_dashboard(snapshot: PhaseOneSnapshot) -> str:
     metrics_block = _render_metrics(snapshot)
     drift_block = _render_drift(snapshot)
     quality_block = _render_quality(snapshot)
+    graph_block = _render_graph(snapshot)
+    rca_block = _render_rca(snapshot)
 
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MII - Phase 1</title>
+  <title>MII - Phase 3</title>
   <style>
     :root {{
       --bg: #09121f;
@@ -170,8 +172,8 @@ def render_dashboard(snapshot: PhaseOneSnapshot) -> str:
 <body>
   <header>
     <div class="eyebrow">ML Incident Intelligence Platform</div>
-    <h1>Phase 1 Live Dashboard</h1>
-    <p class="subtitle">Synthetic telemetry, streaming anomaly detection, and incident creation.</p>
+    <h1>Phase 3 Live Dashboard</h1>
+    <p class="subtitle">Synthetic telemetry, anomaly detection, drift monitoring, dependency graphing, and RCA.</p>
   </header>
   <main>
     <section class="card">
@@ -220,6 +222,17 @@ def render_dashboard(snapshot: PhaseOneSnapshot) -> str:
       <div class="card">
         <h2>Data Quality</h2>
         {quality_block}
+      </div>
+    </section>
+
+    <section class="two-col">
+      <div class="card">
+        <h2>Dependency Graph</h2>
+        {graph_block}
+      </div>
+      <div class="card">
+        <h2>Root Cause Analysis</h2>
+        {rca_block}
       </div>
     </section>
 
@@ -350,3 +363,56 @@ def _render_quality(snapshot: PhaseOneSnapshot) -> str:
             "</tr>"
         )
     return "<table><thead><tr><th>Feature</th><th>Issue</th><th>Rate</th><th>Severity</th><th>Description</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+
+
+def _render_graph(snapshot: PhaseOneSnapshot) -> str:
+    graph = snapshot.dependency_graph
+    nodes = []
+    for node in graph.nodes:
+        children = ", ".join(graph.children(node.node_id)) or "none"
+        nodes.append(
+            "<tr>"
+            f"<td>{escape(node.label)}</td>"
+            f"<td>{escape(node.kind)}</td>"
+            f"<td>{escape(node.team)}</td>"
+            f"<td>{escape(children)}</td>"
+            "</tr>"
+        )
+
+    edges = "".join(
+        f"<li>{escape(edge.source)} → {escape(edge.target)} <span class='muted'>({escape(edge.relationship)})</span></li>"
+        for edge in graph.edges
+    )
+
+    return (
+        "<p class='muted'>Static dependency graph used for causal reasoning and blast-radius analysis.</p>"
+        "<table><thead><tr><th>Component</th><th>Kind</th><th>Team</th><th>Downstream</th></tr></thead><tbody>"
+        + "".join(nodes)
+        + "</tbody></table><h4>Edges</h4><ul>"
+        + edges
+        + "</ul>"
+    )
+
+
+def _render_rca(snapshot: PhaseOneSnapshot) -> str:
+    if not snapshot.root_cause_hypotheses:
+        return '<p class="muted">No RCA hypotheses yet.</p>'
+
+    blocks = []
+    for hypothesis in snapshot.root_cause_hypotheses:
+        reasons = "".join(f"<li>{escape(reason)}</li>" for reason in hypothesis.reasons)
+        signals = ", ".join(hypothesis.evidence_signals) or "none"
+        downstream = ", ".join(hypothesis.downstream_effects) or "none"
+        blocks.append(
+            f"""
+            <div class="metric" style="margin-bottom: 12px;">
+              <div class="name">{escape(hypothesis.label)}</div>
+              <div class="value" style="font-size: 22px;">score {hypothesis.score:.2f}</div>
+              <p><strong>Confidence:</strong> {hypothesis.confidence:.2f}</p>
+              <p><strong>Signals:</strong> {escape(signals)}</p>
+              <p><strong>Downstream effects:</strong> {escape(downstream)}</p>
+              <ul>{reasons}</ul>
+            </div>
+            """
+        )
+    return "".join(blocks)

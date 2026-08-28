@@ -40,6 +40,17 @@ def _make_handler(runtime: PhaseOneRuntime) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/state":
                 self._send_json(runtime.snapshot().to_dict())
                 return
+            if self.path == "/api/graph":
+                self._send_json(runtime.snapshot().dependency_graph.to_dict())
+                return
+            if self.path == "/api/rca":
+                self._send_json(
+                    {
+                        "deployment_events": [event.to_dict() for event in runtime.snapshot().deployment_events],
+                        "root_cause_hypotheses": [hypothesis.to_dict() for hypothesis in runtime.snapshot().root_cause_hypotheses],
+                    }
+                )
+                return
             if self.path == "/healthz":
                 self._send_json({"status": "ok", "step": runtime.step})
                 return

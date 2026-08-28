@@ -15,7 +15,13 @@ Phase 2 adds:
 - data quality monitoring
 - drift and quality panels in the dashboard
 
-The design intentionally leaves room for later phases such as graph-based RCA and tool-using LLM investigation, but those are not implemented yet.
+Phase 3 adds:
+
+- dependency graph modeling
+- graph-based root cause analysis
+- ranked RCA hypotheses with evidence
+
+The design intentionally leaves room for later phases such as tool-using LLM investigation, but those are not implemented yet.
 
 ## Problem
 
@@ -51,6 +57,7 @@ Dashboard + JSON API
 
 See [docs/architecture/phase-1.md](docs/architecture/phase-1.md) for the Phase 1 trade-offs and scope.
 See [docs/architecture/phase-2.md](docs/architecture/phase-2.md) for the Phase 2 monitoring layer.
+See [docs/architecture/phase-3.md](docs/architecture/phase-3.md) for the dependency graph and RCA layer.
 
 ## Phase 1 Scope
 
@@ -68,7 +75,6 @@ Not yet implemented:
 
 - Kafka
 - PostgreSQL
-- root cause analysis graph
 - LLM agent
 - experimentation pipeline
 
@@ -88,6 +94,8 @@ Then open:
 
 - `http://localhost:8080/`
 - `http://localhost:8080/api/state`
+- `http://localhost:8080/api/graph`
+- `http://localhost:8080/api/rca`
 
 ## Tests
 
@@ -105,6 +113,7 @@ src/mii/
   detectors.py      # streaming anomaly detectors
   incidents.py       # incident aggregation
   monitoring.py     # drift + data quality monitoring
+  graph.py          # dependency graph + RCA
   state.py          # runtime orchestration
   dashboard.py      # HTML rendering
   server.py         # HTTP entry point

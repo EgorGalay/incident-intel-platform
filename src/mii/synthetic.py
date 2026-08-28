@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from datetime import timedelta
 from random import Random
 
+from .graph import DeploymentEvent
 from .monitoring import FeatureObservation
 from .models import MetricSample, utcnow
 
@@ -25,6 +27,7 @@ class FeatureProfile:
 
     drift_trigger_step: int = 16
     quality_trigger_step: int = 22
+    deployment_trigger_step: int = 18
     user_age_shift: float = 11.0
     missing_probability: float = 0.24
 
@@ -44,6 +47,7 @@ class SyntheticWorkload:
         self._feature_profile = feature_profile or FeatureProfile()
         self._step = 0
         self._request_counter = 0
+        self._deployment_emitted = False
 
     @property
     def step(self) -> int:
@@ -134,6 +138,24 @@ class SyntheticWorkload:
                 lower=1.0,
                 upper=18.0,
             ),
+        ]
+
+    def deployment_events(self) -> list[DeploymentEvent]:
+        """Emit the feature-service deployment that precedes the incident."""
+
+        if self._deployment_emitted or self._step < self._feature_profile.deployment_trigger_step:
+            return []
+
+        self._deployment_emitted = True
+        timestamp = utcnow() - timedelta(minutes=4)
+        return [
+            DeploymentEvent(
+                timestamp=timestamp,
+                component="feature-service",
+                version="v2.8",
+                step=self._step,
+                description="feature-service:v2.8 deployed with feature normalization changes.",
+            )
         ]
 
     def _feature_observation(

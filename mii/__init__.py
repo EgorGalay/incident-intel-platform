@@ -1,4 +1,15 @@
-"""ML Incident Intelligence Platform."""
+"""Import shim so the `src/` layout works from a plain repository checkout."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+_ROOT = Path(__file__).resolve().parent
+_SRC_PACKAGE = _ROOT.parent / "src" / "mii"
+
+if _SRC_PACKAGE.exists():
+    __path__.append(str(_SRC_PACKAGE))  # type: ignore[name-defined]
 
 from .detectors import DetectorSuite, EWMADeviationDetector, RollingZScoreDetector
 from .graph import (

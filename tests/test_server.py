@@ -30,6 +30,17 @@ class ServerTests(unittest.TestCase):
                 state = json.loads(response.read().decode("utf-8"))
             self.assertIn("latest_metrics", state)
             self.assertIn("recent_anomalies", state)
+            self.assertIn("dependency_graph", state)
+            self.assertIn("root_cause_hypotheses", state)
+
+            with urlopen(f"http://127.0.0.1:{port}/api/graph", timeout=5) as response:
+                graph = json.loads(response.read().decode("utf-8"))
+            self.assertIn("nodes", graph)
+            self.assertIn("edges", graph)
+
+            with urlopen(f"http://127.0.0.1:{port}/api/rca", timeout=5) as response:
+                rca = json.loads(response.read().decode("utf-8"))
+            self.assertIn("root_cause_hypotheses", rca)
         finally:
             server.shutdown()
             server.server_close()
