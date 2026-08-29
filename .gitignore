@@ -11,3 +11,4 @@ dist/
 *.pyo
 *.pyd
 .env
+openaikey.env

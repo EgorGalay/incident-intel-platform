@@ -41,6 +41,11 @@ class ServerTests(unittest.TestCase):
             with urlopen(f"http://127.0.0.1:{port}/api/rca", timeout=5) as response:
                 rca = json.loads(response.read().decode("utf-8"))
             self.assertIn("root_cause_hypotheses", rca)
+
+            with urlopen(f"http://127.0.0.1:{port}/api/investigation", timeout=5) as response:
+                investigation = json.loads(response.read().decode("utf-8"))
+            self.assertIn("historical_incidents", investigation)
+            self.assertIn("investigation_report", investigation)
         finally:
             server.shutdown()
             server.server_close()

@@ -16,6 +16,8 @@ def render_dashboard(snapshot: PhaseOneSnapshot) -> str:
     quality_block = _render_quality(snapshot)
     graph_block = _render_graph(snapshot)
     rca_block = _render_rca(snapshot)
+    investigation_block = _render_investigation(snapshot)
+    history_block = _render_history(snapshot)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -236,6 +238,17 @@ def render_dashboard(snapshot: PhaseOneSnapshot) -> str:
       </div>
     </section>
 
+    <section class="two-col">
+      <div class="card">
+        <h2>LLM Investigation</h2>
+        {investigation_block}
+      </div>
+      <div class="card">
+        <h2>Historical Incidents</h2>
+        {history_block}
+      </div>
+    </section>
+
     <section class="card">
       <h2>Snapshot</h2>
       <p class="muted">The dashboard refreshes automatically from <code>/api/state</code>.</p>
@@ -416,3 +429,50 @@ def _render_rca(snapshot: PhaseOneSnapshot) -> str:
             """
         )
     return "".join(blocks)
+
+
+def _render_investigation(snapshot: PhaseOneSnapshot) -> str:
+    report = snapshot.investigation_report
+    if report is None:
+        return '<p class="muted">Waiting for an active incident to investigate.</p>'
+
+    evidence_rows = "".join(
+        f"<li><strong>{escape(item.label)}</strong> [{escape(item.source)}] {escape(item.detail)} <span class='muted'>({escape(item.citation)})</span></li>"
+        for item in report.evidence[:6]
+    )
+    tool_rows = "".join(
+        f"<li><strong>{escape(trace.tool_name)}</strong>: {escape(trace.summary)}</li>"
+        for trace in report.tool_trace
+    )
+    historical_rows = ", ".join(item.incident_id for item in report.historical_matches) or "none"
+    return (
+        f"<p><strong>Mode:</strong> {escape(report.mode)}</p>"
+        f"<p><strong>Verdict:</strong> {escape(report.verdict)} ({escape(report.verdict_component)})</p>"
+        f"<p><strong>Confidence:</strong> {report.confidence:.2f}</p>"
+        f"<p>{escape(report.summary)}</p>"
+        f"<p><strong>Historical matches:</strong> {escape(historical_rows)}</p>"
+        f"<p><strong>Usage:</strong> {report.usage.input_tokens} input tokens, {report.usage.output_tokens} output tokens, ${report.usage.estimated_cost_usd:.6f} est.</p>"
+        + ("<p class='muted'>" + escape(report.skipped_reason) + "</p>" if report.skipped_reason else "")
+        + "<h4>Evidence</h4><ul>"
+        + evidence_rows
+        + "</ul><h4>Tool trace</h4><ul>"
+        + tool_rows
+        + "</ul>"
+    )
+
+
+def _render_history(snapshot: PhaseOneSnapshot) -> str:
+    if not snapshot.historical_incidents:
+        return '<p class="muted">No historical incidents seeded yet.</p>'
+
+    rows = []
+    for incident in snapshot.historical_incidents[:6]:
+        rows.append(
+            "<tr>"
+            f"<td>{escape(incident.incident_id)}</td>"
+            f"<td>{escape(incident.component)}</td>"
+            f"<td>{escape(incident.root_cause)}</td>"
+            f"<td>{escape(incident.summary)}</td>"
+            "</tr>"
+        )
+    return "<table><thead><tr><th>Incident</th><th>Component</th><th>Root cause</th><th>Summary</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"

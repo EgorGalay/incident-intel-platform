@@ -12,7 +12,7 @@ class DashboardTests(unittest.TestCase):
         runtime = PhaseOneRuntime(
             workload=SyntheticWorkload(seed=9, fault_profile=FaultProfile(trigger_step=4)),
         )
-        for _ in range(22):
+        for _ in range(28):
             snapshot = runtime.tick()
 
         html = render_dashboard(snapshot)
@@ -22,6 +22,8 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("Latest Metrics", html)
         self.assertIn("Dependency Graph", html)
         self.assertIn("Root Cause Analysis", html)
+        self.assertIn("LLM Investigation", html)
+        self.assertIn("Historical Incidents", html)
 
 
 if __name__ == "__main__":

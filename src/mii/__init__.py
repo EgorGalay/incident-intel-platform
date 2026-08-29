@@ -11,6 +11,15 @@ from .graph import (
     build_default_dependency_graph,
 )
 from .incidents import IncidentEngine
+from .investigation import (
+    AgentUsage,
+    EvidenceItem,
+    HistoricalIncident,
+    IncidentInvestigator,
+    InvestigationReport,
+    ToolTrace,
+    build_default_historical_incidents,
+)
 from .monitoring import DataQualityIssue, DataQualityMonitor, DriftFinding, DriftMonitor, FeatureObservation
 from .models import DetectedAnomaly, Incident, MetricSample
 from .synthetic import FeatureProfile, FaultProfile, SyntheticWorkload
@@ -23,21 +32,28 @@ __all__ = [
     "DependencyGraph",
     "DetectedAnomaly",
     "DetectorSuite",
+    "AgentUsage",
+    "EvidenceItem",
     "DriftFinding",
     "DriftMonitor",
     "EWMADeviationDetector",
     "FeatureObservation",
     "FeatureProfile",
     "FaultProfile",
+    "HistoricalIncident",
     "GraphEdge",
     "GraphNode",
     "GraphRCAEngine",
     "Incident",
     "IncidentEngine",
+    "IncidentInvestigator",
+    "InvestigationReport",
     "MetricSample",
     "PhaseOneRuntime",
     "RootCauseHypothesis",
     "RollingZScoreDetector",
+    "ToolTrace",
     "SyntheticWorkload",
+    "build_default_historical_incidents",
     "build_default_dependency_graph",
 ]

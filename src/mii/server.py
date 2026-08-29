@@ -51,6 +51,15 @@ def _make_handler(runtime: PhaseOneRuntime) -> type[BaseHTTPRequestHandler]:
                     }
                 )
                 return
+            if self.path == "/api/investigation":
+                snapshot = runtime.snapshot()
+                self._send_json(
+                    {
+                        "investigation_report": None if snapshot.investigation_report is None else snapshot.investigation_report.to_dict(),
+                        "historical_incidents": [incident.to_dict() for incident in snapshot.historical_incidents],
+                    }
+                )
+                return
             if self.path == "/healthz":
                 self._send_json({"status": "ok", "step": runtime.step})
                 return

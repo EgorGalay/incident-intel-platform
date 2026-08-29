@@ -21,7 +21,15 @@ Phase 3 adds:
 - graph-based root cause analysis
 - ranked RCA hypotheses with evidence
 
-The design intentionally leaves room for later phases such as tool-using LLM investigation, but those are not implemented yet.
+Phase 4 adds:
+
+- tool-based LLM investigation
+- grounded evidence summaries
+- historical incident memory
+- request/token/cost tracking
+- optional local Ollama-backed investigations
+
+See [docs/architecture/phase-4.md](docs/architecture/phase-4.md) for the investigation layer.
 
 ## Problem
 
@@ -58,6 +66,7 @@ Dashboard + JSON API
 See [docs/architecture/phase-1.md](docs/architecture/phase-1.md) for the Phase 1 trade-offs and scope.
 See [docs/architecture/phase-2.md](docs/architecture/phase-2.md) for the Phase 2 monitoring layer.
 See [docs/architecture/phase-3.md](docs/architecture/phase-3.md) for the dependency graph and RCA layer.
+See [docs/architecture/phase-4.md](docs/architecture/phase-4.md) for the evidence-grounded investigation layer.
 
 ## Phase 1 Scope
 
@@ -90,12 +99,25 @@ Or run locally:
 python -m mii.server
 ```
 
+To use the free local Ollama path instead of OpenAI API calls:
+
+```powershell
+ollama pull llama3.1
+$env:MII_LLM_PROVIDER="ollama"
+$env:MII_OLLAMA_MODEL="llama3.1"
+$env:MII_OLLAMA_HOST="http://127.0.0.1:11434"
+python -m mii.server
+```
+
+If Ollama is not running or the model is missing, the app falls back to the grounded local narrative.
+
 Then open:
 
 - `http://localhost:8080/`
 - `http://localhost:8080/api/state`
 - `http://localhost:8080/api/graph`
 - `http://localhost:8080/api/rca`
+- `http://localhost:8080/api/investigation`
 
 ## Tests
 
@@ -114,6 +136,7 @@ src/mii/
   incidents.py       # incident aggregation
   monitoring.py     # drift + data quality monitoring
   graph.py          # dependency graph + RCA
+  investigation.py  # tool-based LLM investigation
   state.py          # runtime orchestration
   dashboard.py      # HTML rendering
   server.py         # HTTP entry point

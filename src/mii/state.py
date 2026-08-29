@@ -8,6 +8,7 @@ from typing import Any
 from .detectors import DetectorSuite, EWMADeviationDetector, RollingZScoreDetector
 from .incidents import IncidentEngine
 from .graph import DeploymentEvent, DependencyGraph, GraphRCAEngine, RootCauseHypothesis, build_default_dependency_graph
+from .investigation import HistoricalIncident, IncidentInvestigator, InvestigationReport, build_default_historical_incidents
 from .monitoring import DataQualityIssue, DataQualityMonitor, DriftFinding, DriftMonitor, FeatureObservation
 from .models import DetectedAnomaly, Incident, MetricSample
 from .synthetic import SyntheticWorkload
@@ -27,6 +28,8 @@ class PhaseOneSnapshot:
     deployment_events: list[DeploymentEvent]
     dependency_graph: DependencyGraph
     root_cause_hypotheses: list[RootCauseHypothesis]
+    historical_incidents: list[HistoricalIncident]
+    investigation_report: InvestigationReport | None
     incident: Incident | None
 
     def to_dict(self) -> dict[str, Any]:
@@ -43,6 +46,8 @@ class PhaseOneSnapshot:
             "deployment_events": [event.to_dict() for event in self.deployment_events],
             "dependency_graph": self.dependency_graph.to_dict(),
             "root_cause_hypotheses": [hypothesis.to_dict() for hypothesis in self.root_cause_hypotheses],
+            "historical_incidents": [item.to_dict() for item in self.historical_incidents],
+            "investigation_report": None if self.investigation_report is None else self.investigation_report.to_dict(),
             "incident": None if self.incident is None else self.incident.to_dict(),
         }
 
@@ -64,6 +69,8 @@ class PhaseOneRuntime:
     drift_monitor: DriftMonitor = field(default_factory=DriftMonitor)
     quality_monitor: DataQualityMonitor = field(default_factory=DataQualityMonitor)
     dependency_graph: DependencyGraph = field(default_factory=build_default_dependency_graph)
+    investigator: IncidentInvestigator = field(default_factory=IncidentInvestigator)
+    historical_incidents: list[HistoricalIncident] = field(default_factory=build_default_historical_incidents)
     rca_engine: GraphRCAEngine = field(init=False, repr=False)
     history_size: int = 40
     _deployment_events: list[DeploymentEvent] = field(init=False, repr=False)
@@ -73,6 +80,8 @@ class PhaseOneRuntime:
     _drift_findings: list[DriftFinding] = field(init=False, repr=False)
     _quality_issues: list[DataQualityIssue] = field(init=False, repr=False)
     _root_cause_hypotheses: list[RootCauseHypothesis] = field(init=False, repr=False)
+    _investigation_report: InvestigationReport | None = field(init=False, repr=False)
+    _historical_incident_ids: set[str] = field(init=False, repr=False)
     _latest_metrics: dict[str, float] = field(init=False, repr=False)
     _metric_units: dict[str, str] = field(init=False, repr=False)
     _running: Event = field(init=False, repr=False)
@@ -87,6 +96,8 @@ class PhaseOneRuntime:
         self._drift_findings: list[DriftFinding] = []
         self._quality_issues: list[DataQualityIssue] = []
         self._root_cause_hypotheses: list[RootCauseHypothesis] = []
+        self._investigation_report: InvestigationReport | None = None
+        self._historical_incident_ids = {incident.incident_id for incident in self.historical_incidents}
         self._latest_metrics: dict[str, float] = {}
         self._metric_units: dict[str, str] = {}
         self._running = Event()
@@ -127,7 +138,15 @@ class PhaseOneRuntime:
         self._append_quality_issues(quality_issues)
         self._append_deployment_events(deployment_events)
         self._append_root_cause_hypotheses(root_cause_hypotheses)
-        return self.snapshot()
+        snapshot = self.snapshot()
+        if snapshot.incident is not None:
+            self._investigation_report = self.investigator.investigate(
+                snapshot=snapshot,
+                historical_incidents=list(self.historical_incidents),
+            )
+            self._append_historical_incident(self._investigation_report)
+            snapshot = self.snapshot()
+        return snapshot
 
     def _append_samples(self, samples: list[MetricSample]) -> None:
         self._recent_samples.extend(samples)
@@ -159,6 +178,12 @@ class PhaseOneRuntime:
     def _append_root_cause_hypotheses(self, hypotheses: list[RootCauseHypothesis]) -> None:
         self._root_cause_hypotheses = list(hypotheses)
 
+    def _append_historical_incident(self, report: InvestigationReport | None) -> None:
+        if report is None or report.incident_id in self._historical_incident_ids:
+            return
+        self.historical_incidents.insert(0, HistoricalIncident.from_report(report))
+        self._historical_incident_ids.add(report.incident_id)
+
     def snapshot(self) -> PhaseOneSnapshot:
         return PhaseOneSnapshot(
             generated_at=datetime.now(timezone.utc),
@@ -173,6 +198,8 @@ class PhaseOneRuntime:
             deployment_events=list(self._deployment_events),
             dependency_graph=self.dependency_graph,
             root_cause_hypotheses=list(self._root_cause_hypotheses),
+            historical_incidents=list(self.historical_incidents),
+            investigation_report=self._investigation_report,
             incident=self.active_incident,
         )
 
