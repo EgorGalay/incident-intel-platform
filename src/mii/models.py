@@ -39,11 +39,20 @@ INVESTIGATION_LOCAL_FALLBACK = "local-fallback"
 INVESTIGATION_OLLAMA = "ollama"
 INVESTIGATION_OPENAI = "openai"
 
+# Legacy Phase 4 mode vocabulary, kept for backward compatibility with the
+# previous IncidentInvestigator contract (see investigation.py). New code
+# should prefer the canonical values above; these are accepted so old
+# callers/tests are not forced onto the new vocabulary.
+INVESTIGATION_LLM = "llm"
+INVESTIGATION_ML_SUFFICIENT = "ml-sufficient"
+
 VALID_INVESTIGATION_MODES = frozenset(
     {
         INVESTIGATION_LOCAL_FALLBACK,
         INVESTIGATION_OLLAMA,
         INVESTIGATION_OPENAI,
+        INVESTIGATION_LLM,
+        INVESTIGATION_ML_SUFFICIENT,
     }
 )
 
@@ -362,6 +371,7 @@ class InvestigationReport:
     historical_matches: list[str] = field(default_factory=list)
     usage: dict[str, object] = field(default_factory=dict)
     tool_trace: list[dict[str, Any]] = field(default_factory=list)
+    skipped_reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in VALID_INVESTIGATION_MODES:
@@ -376,6 +386,15 @@ class InvestigationReport:
                 f"Investigation confidence must be between 0.0 and 1.0, "
                 f"got {self.confidence!r}"
             )
+
+    # ------------------------------------------------------------------
+    # Backward-compatible aliases for the previous Phase 4 code.
+    # ------------------------------------------------------------------
+
+    @property
+    def recommended_actions(self) -> list[str]:
+        """Backward-compatible alias for ``recommendations``."""
+        return self.recommendations
 
     def to_dict(self) -> dict[str, Any]:
         """

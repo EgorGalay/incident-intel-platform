@@ -383,17 +383,19 @@ def _render_graph(snapshot: PhaseOneSnapshot) -> str:
     nodes = []
     for node in graph.nodes:
         children = ", ".join(graph.children(node.name)) or "none"
+        label = str(node.metadata.get("label", node.name))
+        team = str(node.metadata.get("team", ""))
         nodes.append(
             "<tr>"
-            f"<td>{escape(node.label)}</td>"
-            f"<td>{escape(node.kind)}</td>"
-            f"<td>{escape(node.team)}</td>"
+            f"<td>{escape(label)}</td>"
+            f"<td>{escape(node.component_type)}</td>"
+            f"<td>{escape(team)}</td>"
             f"<td>{escape(children)}</td>"
             "</tr>"
         )
 
     edges = "".join(
-        f"<li>{escape(edge.source)} → {escape(edge.target)} <span class='muted'>({escape(edge.relationship)})</span></li>"
+        f"<li>{escape(edge.source)} → {escape(edge.target)} <span class='muted'>({escape(edge.relation)})</span></li>"
         for edge in graph.edges
     )
 
@@ -437,17 +439,17 @@ def _render_investigation(snapshot: PhaseOneSnapshot) -> str:
         return '<p class="muted">Waiting for an active incident to investigate.</p>'
 
     evidence_rows = "".join(
-        f"<li><strong>{escape(item.label)}</strong> [{escape(item.source)}] {escape(item.detail)} <span class='muted'>({escape(item.citation)})</span></li>"
+        f"<li>{escape(str(item))}</li>"
         for item in report.evidence[:6]
     )
     tool_rows = "".join(
-        f"<li><strong>{escape(trace.tool_name)}</strong>: {escape(trace.summary)}</li>"
+        f"<li><strong>{escape(str(trace.get('tool', '')))}</strong>: {escape(str(trace.get('output', '')))}</li>"
         for trace in report.tool_trace
     )
-    historical_rows = ", ".join(item.incident_id for item in report.historical_matches) or "none"
+    historical_rows = ", ".join(str(item) for item in report.historical_matches) or "none"
     return (
         f"<p><strong>Mode:</strong> {escape(report.mode)}</p>"
-        f"<p><strong>Verdict:</strong> {escape(report.verdict)} ({escape(report.verdict_component)})</p>"
+        f"<p><strong>Verdict:</strong> {escape(report.verdict)}</p>"
         f"<p><strong>Confidence:</strong> {report.confidence:.2f}</p>"
         f"<p>{escape(report.summary)}</p>"
         f"<p><strong>Historical matches:</strong> {escape(historical_rows)}</p>"

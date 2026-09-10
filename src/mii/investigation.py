@@ -95,6 +95,29 @@ class AgentUsage:
         return asdict(self)
 
 
+class UsageInfo(dict):
+    """
+    Dict-compatible usage payload that also supports attribute access.
+
+    ``InvestigationReport.usage`` is a plain ``dict`` in the canonical
+    model (so ``to_dict()``/JSON serialization keeps working unchanged),
+    but the previous Phase 4 callers/tests access it as
+    ``usage.provider`` / ``usage.model`` / ``usage.input_tokens``. This
+    class satisfies both without duplicating state.
+    """
+
+    def __getattr__(self, item: str) -> Any:
+        try:
+            return self[item]
+        except KeyError as exc:
+            raise AttributeError(item) from exc
+
+
+def _estimate_tokens(text: str) -> int:
+    """Deterministic, dependency-free token estimate for usage accounting."""
+    return max(1, len(str(text).split()))
+
+
 def build_default_historical_incidents() -> list[HistoricalIncident]:
     return [
         HistoricalIncident(
@@ -168,22 +191,22 @@ class InvestigationService:
     ) -> InvestigationReport:
         prompt = self.build_prompt(incident, rca_result, state)
         if self.provider in {"local", "local-fallback", "fallback", "none"}:
-            return self.local_fallback(incident, rca_result)
+            return self.local_fallback(incident, rca_result, prompt)
 
         if self.provider == "ollama":
             try:
                 text = self.call_ollama(prompt)
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("empty Ollama response")
-                return self._make_report(incident, rca_result, text, "ollama")
+                return self._make_report(incident, rca_result, text, "ollama", prompt)
             except Exception:
                 logger.exception("Ollama investigation failed; using local fallback")
-                return self.local_fallback(incident, rca_result)
+                return self.local_fallback(incident, rca_result, prompt)
 
         if self.provider == "openai":
-            return self.local_fallback(incident, rca_result)
+            return self.local_fallback(incident, rca_result, prompt)
 
-        return self.local_fallback(incident, rca_result)
+        return self.local_fallback(incident, rca_result, prompt)
 
     def build_prompt(
         self,
@@ -232,6 +255,7 @@ class InvestigationService:
         self,
         incident: Incident,
         rca_result: Any,
+        prompt: str = "",
     ) -> InvestigationReport:
         root = self._value(rca_result, "root_cause") or self._value(rca_result, "root_cause_label")
         confidence = self._confidence(rca_result)
@@ -256,7 +280,7 @@ class InvestigationService:
             verdict=verdict,
             confidence=confidence,
             summary=(
-                "Deterministic local investigation based on telemetry, "
+                "Grounded investigation based on deterministic telemetry, "
                 "RCA evidence, and dependency relationships."
             ),
             root_cause_analysis=verdict,
@@ -264,12 +288,16 @@ class InvestigationService:
             downstream_effects=downstream,
             recommendations=recommendations,
             historical_matches=self._historical_strings(rca_result),
-            usage={
-                "provider": "local-fallback",
-                "model": "deterministic",
-                "total_tokens": 0,
-                "estimated_cost_usd": 0.0,
-            },
+            usage=UsageInfo(
+                provider="local-fallback",
+                model="deterministic",
+                prompt_tokens=_estimate_tokens(prompt),
+                completion_tokens=0,
+                input_tokens=_estimate_tokens(prompt),
+                output_tokens=0,
+                total_tokens=_estimate_tokens(prompt),
+                estimated_cost_usd=0.0,
+            ),
         )
         self._attach_compatibility(report, "local-fallback")
         return report
@@ -280,7 +308,10 @@ class InvestigationService:
         rca_result: Any,
         text: str,
         mode: str,
+        prompt: str = "",
     ) -> InvestigationReport:
+        input_tokens = _estimate_tokens(prompt)
+        output_tokens = _estimate_tokens(text)
         report = InvestigationReport(
             incident_id=incident.incident_id,
             mode=mode,
@@ -295,7 +326,16 @@ class InvestigationService:
             downstream_effects=self._list_value(rca_result, "downstream_effects"),
             recommendations=list(incident.recommendations),
             historical_matches=self._historical_strings(rca_result),
-            usage={"provider": mode, "model": self.ollama_model},
+            usage=UsageInfo(
+                provider=mode,
+                model=self.ollama_model,
+                prompt_tokens=input_tokens,
+                completion_tokens=output_tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                estimated_cost_usd=0.0,
+            ),
         )
         self._attach_compatibility(report, mode)
         return report
@@ -440,7 +480,28 @@ class InvestigationToolbelt:
 
 
 class IncidentInvestigator:
-    """Compatibility wrapper for the previous Phase 4 runtime."""
+    """
+    Compatibility wrapper for the previous Phase 4 runtime.
+
+    On top of ``InvestigationService`` (which only knows the canonical
+    ``local-fallback`` / ``ollama`` / ``openai`` modes), this wrapper
+    restores the previous Phase 4 mode vocabulary and decision rule:
+
+        no_llm=True
+            -> always "local-fallback" (LLM disabled by configuration).
+        llm_provider given explicitly
+            -> always attempt that provider; canonical "ollama"/"openai"
+               are reported back as "llm", canonical "local-fallback"
+               (i.e. the attempt failed) stays "local-fallback".
+        llm_provider omitted (auto mode)
+            -> if the deterministic RCA/incident confidence already meets
+               ``llm_confidence_threshold``, the LLM is not even called
+               ("ml-sufficient"); this also avoids unnecessary network
+               calls (and the timeouts that come with them) when the
+               deterministic evidence is already strong enough.
+            -> otherwise the configured provider (env/config default) is
+               attempted, same remapping as above.
+    """
 
     def __init__(
             self,
@@ -452,6 +513,8 @@ class IncidentInvestigator:
             llm_confidence_threshold: float = 0.65,
     ) -> None:
         self.llm_confidence_threshold = llm_confidence_threshold
+        self.no_llm = no_llm
+        self._explicit_provider = llm_provider is not None
 
         self.service = InvestigationService(
             provider="local-fallback" if no_llm else llm_provider,
@@ -477,15 +540,39 @@ class IncidentInvestigator:
         if rca_result is None:
             hypotheses = getattr(snapshot, "root_cause_hypotheses", [])
             first = hypotheses[0] if hypotheses else None
+            evidence = list(getattr(first, "evidence_signals", []) or []) if first else []
             rca_result = {
                 "root_cause": getattr(first, "component", None) if first else incident.root_cause,
                 "confidence": getattr(first, "confidence", incident.confidence) if first else incident.confidence,
-                "evidence": [],
-                "downstream_effects": incident.affected_components,
+                "evidence": evidence,
+                "downstream_effects": getattr(first, "downstream_effects", None) or incident.affected_components,
                 "historical_matches": [getattr(x, "incident_id", str(x)) for x in (historical_incidents or [])[:5]],
             }
 
-        return self.service.investigate(incident, rca_result, snapshot)
+        if self.no_llm:
+            report = self.service.investigate(incident, rca_result, snapshot)
+            report.skipped_reason = "LLM disabled (no_llm=True)."
+            return report
+
+        if not self._explicit_provider:
+            confidence = InvestigationService._confidence(rca_result)
+            if confidence >= self.llm_confidence_threshold:
+                report = self.service.local_fallback(
+                    incident, rca_result, self.service.build_prompt(incident, rca_result, snapshot)
+                )
+                report.mode = "ml-sufficient"
+                report.skipped_reason = (
+                    f"Deterministic confidence {confidence:.2f} >= "
+                    f"threshold {self.llm_confidence_threshold:.2f}; skipped LLM call."
+                )
+                report.usage["provider"] = "ml-sufficient"
+                return report
+
+        report = self.service.investigate(incident, rca_result, snapshot)
+        if report.mode in {"ollama", "openai"}:
+            report.mode = "llm"
+        report.skipped_reason = None
+        return report
 
 
 __all__ = [
