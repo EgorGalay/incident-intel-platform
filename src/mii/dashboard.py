@@ -382,7 +382,7 @@ def _render_graph(snapshot: PhaseOneSnapshot) -> str:
     graph = snapshot.dependency_graph
     nodes = []
     for node in graph.nodes:
-        children = ", ".join(graph.children(node.node_id)) or "none"
+        children = ", ".join(graph.children(node.name)) or "none"
         nodes.append(
             "<tr>"
             f"<td>{escape(node.label)}</td>"
