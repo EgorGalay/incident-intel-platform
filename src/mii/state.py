@@ -11,6 +11,7 @@ from .graph import DeploymentEvent, DependencyGraph, GraphRCAEngine, RootCauseHy
 from .investigation import HistoricalIncident, IncidentInvestigator, InvestigationReport, build_default_historical_incidents
 from .monitoring import DataQualityIssue, DataQualityMonitor, DriftFinding, DriftMonitor, FeatureObservation
 from .models import DetectedAnomaly, Incident, MetricSample
+from .rca import RCAResult, RCAService
 from .synthetic import SyntheticWorkload
 
 
@@ -28,6 +29,7 @@ class PhaseOneSnapshot:
     deployment_events: list[DeploymentEvent]
     dependency_graph: DependencyGraph
     root_cause_hypotheses: list[RootCauseHypothesis]
+    rca_result: RCAResult | None
     historical_incidents: list[HistoricalIncident]
     investigation_report: InvestigationReport | None
     incident: Incident | None
@@ -46,6 +48,7 @@ class PhaseOneSnapshot:
             "deployment_events": [event.to_dict() for event in self.deployment_events],
             "dependency_graph": self.dependency_graph.to_dict(),
             "root_cause_hypotheses": [hypothesis.to_dict() for hypothesis in self.root_cause_hypotheses],
+            "rca_result": None if self.rca_result is None else self.rca_result.to_dict(),
             "historical_incidents": [item.to_dict() for item in self.historical_incidents],
             "investigation_report": None if self.investigation_report is None else self.investigation_report.to_dict(),
             "incident": None if self.incident is None else self.incident.to_dict(),
@@ -72,6 +75,7 @@ class PhaseOneRuntime:
     investigator: IncidentInvestigator = field(default_factory=IncidentInvestigator)
     historical_incidents: list[HistoricalIncident] = field(default_factory=build_default_historical_incidents)
     rca_engine: GraphRCAEngine = field(init=False, repr=False)
+    rca_service: RCAService = field(init=False, repr=False)
     history_size: int = 40
     _deployment_events: list[DeploymentEvent] = field(init=False, repr=False)
     _recent_samples: list[MetricSample] = field(init=False, repr=False)
@@ -80,6 +84,7 @@ class PhaseOneRuntime:
     _drift_findings: list[DriftFinding] = field(init=False, repr=False)
     _quality_issues: list[DataQualityIssue] = field(init=False, repr=False)
     _root_cause_hypotheses: list[RootCauseHypothesis] = field(init=False, repr=False)
+    _rca_result: RCAResult | None = field(init=False, repr=False)
     _investigation_report: InvestigationReport | None = field(init=False, repr=False)
     _historical_incident_ids: set[str] = field(init=False, repr=False)
     _latest_metrics: dict[str, float] = field(init=False, repr=False)
@@ -89,6 +94,7 @@ class PhaseOneRuntime:
 
     def __post_init__(self) -> None:
         self.rca_engine = GraphRCAEngine(self.dependency_graph)
+        self.rca_service = RCAService(self.dependency_graph, historical_incidents=self.historical_incidents)
         self._deployment_events: list[DeploymentEvent] = []
         self._recent_samples: list[MetricSample] = []
         self._recent_anomalies: list[DetectedAnomaly] = []
@@ -96,6 +102,7 @@ class PhaseOneRuntime:
         self._drift_findings: list[DriftFinding] = []
         self._quality_issues: list[DataQualityIssue] = []
         self._root_cause_hypotheses: list[RootCauseHypothesis] = []
+        self._rca_result: RCAResult | None = None
         self._investigation_report: InvestigationReport | None = None
         self._historical_incident_ids = {incident.incident_id for incident in self.historical_incidents}
         self._latest_metrics: dict[str, float] = {}
@@ -138,6 +145,22 @@ class PhaseOneRuntime:
         self._append_quality_issues(quality_issues)
         self._append_deployment_events(deployment_events)
         self._append_root_cause_hypotheses(root_cause_hypotheses)
+        if self.active_incident is not None:
+            # Keep the deterministic RCA service in sync with historical
+            # incidents discovered by earlier ticks (see
+            # ``_append_historical_incident``), so historical matching
+            # stays grounded in what the runtime has actually seen so far.
+            self.rca_service.historical_incidents = list(self.historical_incidents)
+            self._rca_result = self.rca_service.analyze(
+                self.active_incident,
+                step=self.step,
+                drift_findings=drift_findings,
+                quality_issues=quality_issues,
+                feature_observations=feature_observations,
+                deployment_events=deployment_events,
+            )
+        else:
+            self._rca_result = None
         snapshot = self.snapshot()
         if snapshot.incident is not None:
             self._investigation_report = self.investigator.investigate(
@@ -198,6 +221,7 @@ class PhaseOneRuntime:
             deployment_events=list(self._deployment_events),
             dependency_graph=self.dependency_graph,
             root_cause_hypotheses=list(self._root_cause_hypotheses),
+            rca_result=self._rca_result,
             historical_incidents=list(self.historical_incidents),
             investigation_report=self._investigation_report,
             incident=self.active_incident,

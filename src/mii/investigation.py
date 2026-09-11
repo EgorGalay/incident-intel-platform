@@ -180,7 +180,8 @@ class InvestigationService:
         self.timeout_seconds = float(
             timeout_seconds
             if timeout_seconds is not None
-            else getattr(config, "request_timeout", 30.0)
+            else getattr(config, "request_timeout", None)
+            or os.getenv("MII_OLLAMA_TIMEOUT_SECONDS", "30.0")
         )
 
     def investigate(
@@ -508,7 +509,7 @@ class IncidentInvestigator:
             llm_provider: str | None = None,
             ollama_host: str | None = None,
             ollama_model: str | None = None,
-            timeout_seconds: float = 30.0,
+            timeout_seconds: float | None = None,
             no_llm: bool = False,
             llm_confidence_threshold: float = 0.65,
     ) -> None:

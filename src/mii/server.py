@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 from .dashboard import render_dashboard
 from .state import PhaseOneRuntime
@@ -29,6 +30,34 @@ def main() -> None:
     finally:
         runtime.stop_background()
         server.server_close()
+
+
+def _investigate_incident(runtime: PhaseOneRuntime, incident) -> dict[str, object]:
+    """
+    Run a deterministic RCA + investigation pass for an arbitrary incident
+    (not necessarily the currently active one), without disturbing the
+    runtime's own tick-driven ``_rca_result``/``_investigation_report``
+    state.
+    """
+    runtime.rca_service.historical_incidents = list(runtime.historical_incidents)
+    rca_result = runtime.rca_service.analyze(
+        incident,
+        step=runtime.step,
+        drift_findings=runtime._drift_findings,
+        quality_issues=runtime._quality_issues,
+        feature_observations=runtime._recent_feature_observations,
+        deployment_events=runtime._deployment_events,
+    )
+    ad_hoc_snapshot = SimpleNamespace(incident=incident, rca_result=rca_result)
+    report = runtime.investigator.investigate(
+        snapshot=ad_hoc_snapshot,
+        historical_incidents=list(runtime.historical_incidents),
+    )
+    return {
+        "incident": incident.to_dict(),
+        "rca_result": rca_result.to_dict(),
+        "investigation_report": None if report is None else report.to_dict(),
+    }
 
 
 def _make_handler(runtime: PhaseOneRuntime) -> type[BaseHTTPRequestHandler]:
@@ -60,13 +89,79 @@ def _make_handler(runtime: PhaseOneRuntime) -> type[BaseHTTPRequestHandler]:
                     }
                 )
                 return
-            if self.path == "/healthz":
+            if self.path == "/api/incidents":
+                self._send_json(
+                    {"incidents": [incident.to_dict() for incident in runtime.incident_engine.incidents]}
+                )
+                return
+            if self.path.startswith("/api/incidents/"):
+                incident_id = self.path[len("/api/incidents/") :].strip("/")
+                if not incident_id:
+                    self.send_error(404, "Not found")
+                    return
+                try:
+                    incident = runtime.incident_engine.get_incident(incident_id)
+                except KeyError:
+                    self.send_error(404, f"Unknown incident_id: {incident_id}")
+                    return
+                self._send_json(incident.to_dict())
+                return
+            if self.path in {"/health", "/healthz"}:
                 self._send_json({"status": "ok", "step": runtime.step})
                 return
             self.send_error(404, "Not found")
 
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path.startswith("/api/incidents/") and self.path.endswith("/investigate"):
+                incident_id = self.path[len("/api/incidents/") : -len("/investigate")].strip("/")
+                incident = None
+                if incident_id:
+                    try:
+                        incident = runtime.incident_engine.get_incident(incident_id)
+                    except KeyError:
+                        incident = None
+                if incident is None:
+                    self.send_error(404, f"Unknown incident_id: {incident_id}")
+                    return
+                self._send_json(_investigate_incident(runtime, incident))
+                return
+
+            if self.path == "/api/investigation":
+                body = self._read_json_body()
+                incident_id = body.get("incident_id") if isinstance(body, dict) else None
+                incident = None
+                if incident_id:
+                    try:
+                        incident = runtime.incident_engine.get_incident(incident_id)
+                    except KeyError:
+                        incident = None
+                else:
+                    incident = runtime.active_incident
+                if incident is None:
+                    self.send_error(
+                        404,
+                        "No active incident and no valid incident_id was provided.",
+                    )
+                    return
+                self._send_json(_investigate_incident(runtime, incident))
+                return
+
+            self.send_error(404, "Not found")
+
         def log_message(self, format: str, *args: object) -> None:  # noqa: A003
             return
+
+        def _read_json_body(self) -> object:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if length <= 0:
+                return {}
+            raw = self.rfile.read(length)
+            if not raw:
+                return {}
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {}
 
         def _send_html(self, body: str) -> None:
             encoded = body.encode("utf-8")
